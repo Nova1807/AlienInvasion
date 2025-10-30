@@ -1,98 +1,133 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Image, StyleSheet, View } from 'react-native';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
+import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { useGame } from '@/context/game-context';
 
-export default function HomeScreen() {
+export default function ModeGatewayScreen() {
+  const router = useRouter();
+  const { setMode, resetGame } = useGame();
+  const alienPortrait = require('@/assets/images/Alien.jpg');
+
+  const handleSingle = () => {
+    resetGame();
+    setMode('single');
+    router.push('/setup/single/player-count');
+  };
+
+  const handleNetwork = () => {
+    resetGame();
+    setMode('network');
+    router.push('/setup/network');
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <ThemedView style={styles.screen}>
+      <View style={styles.container}>
+        <View style={styles.heroCard}>
+          <View style={styles.heroGlow} pointerEvents="none" />
+          <Image source={alienPortrait} style={styles.heroImage} accessibilityIgnoresInvertColors />
+          <View style={styles.heroText}>
+            <ThemedText type="title" style={styles.title}>
+              Alien Invasion
+            </ThemedText>
+            <ThemedText style={styles.subtitle}>
+              Kosmische Katzen brauchen eine Spielleitung. Wähle den Modus und leite sie durch die
+              Sterne.
+            </ThemedText>
+          </View>
+        </View>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
+        <View style={styles.buttonStack}>
+          <PrimaryButton label="Gemeinsames Gerät" onPress={handleSingle} />
+          <PrimaryButton label="Mehrgeräte" onPress={handleNetwork} />
+        </View>
+
+        <ThemedText style={styles.hint}>
+          Im Mehrgeräte-Modus startet eine Host-Lobby mit Code, Gäste treten mit Namen und Stimme
+          bei.
         </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      </View>
+    </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
+  screen: {
+    flex: 1,
+    padding: 24,
+  },
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: 28,
+  },
+  heroCard: {
+    borderRadius: 28,
+    padding: 20,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(9,16,28,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(135,255,134,0.25)',
     alignItems: 'center',
-    gap: 8,
+    gap: 16,
+    shadowColor: '#3aff9d',
+    shadowOpacity: 0.25,
+    shadowRadius: 32,
+    shadowOffset: { width: 0, height: 18 },
+    elevation: 8,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
+  heroGlow: {
     position: 'absolute',
+    width: 260,
+    height: 260,
+    top: -110,
+    right: -120,
+    backgroundColor: 'rgba(135,255,134,0.18)',
+    borderRadius: 260,
+    opacity: 0.9,
+    shadowColor: '#87ff86',
+    shadowOpacity: 0.6,
+    shadowRadius: 120,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  heroImage: {
+    width: 160,
+    height: 160,
+    borderRadius: 120,
+    borderWidth: 2,
+    borderColor: 'rgba(135,255,134,0.4)',
+    alignSelf: 'center',
+  },
+  heroText: {
+    gap: 12,
+  },
+  title: {
+    textAlign: 'center',
+  },
+  subtitle: {
+    textAlign: 'center',
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  buttonStack: {
+    gap: 16,
+    backgroundColor: 'rgba(9,16,28,0.9)',
+    padding: 20,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(135,255,134,0.2)',
+    shadowColor: '#3aff9d',
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 18 },
+    elevation: 6,
+  },
+  hint: {
+    textAlign: 'center',
+    fontSize: 13,
+    opacity: 0.8,
   },
 });
