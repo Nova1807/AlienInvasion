@@ -9,7 +9,7 @@ import { useGame } from '@/context/game-context';
 export default function ModeGatewayScreen() {
   const router = useRouter();
   const { setMode, resetGame } = useGame();
-  const alienPortrait = require('@/assets/images/Alien.jpg');
+  const alienPortrait = require('@/assets/Alien1.png');
 
   const handleSingle = () => {
     resetGame();

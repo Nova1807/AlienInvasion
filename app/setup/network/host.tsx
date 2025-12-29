@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, SafeAreaView, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
@@ -18,23 +18,31 @@ export default function NetworkHostScreen() {
   } = useGame();
 
   const [hostName, setHostName] = useState('');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
   const bgCard = useThemeColor({ light: 'rgba(9,16,28,0.92)', dark: 'rgba(9,16,28,0.92)' }, 'background');
   const border = useThemeColor({ light: 'rgba(135,255,134,0.28)', dark: 'rgba(135,255,134,0.28)' }, 'tint');
   const placeholder = '#7fb896';
   const textColor = useThemeColor({}, 'text');
 
-  const voteStats = useMemo(() => {
-    const yes = players.filter((p) => p.revealVote === true).length;
-    const no = players.filter((p) => p.revealVote === false).length;
-    const undecided = players.length - yes - no;
-    const majorityReached = yes > players.length / 2;
-    return { yes, no, undecided, majorityReached };
+  const { hostPlayer, nonHostPlayers, voteStats } = useMemo(() => {
+    const host = players.find((p) => p.isHost) ?? null;
+    const attendees = players.filter((p) => !p.isHost);
+    const yes = attendees.filter((p) => p.revealVote === true).length;
+    const no = attendees.filter((p) => p.revealVote === false).length;
+    const undecided = attendees.length - yes - no;
+    const majorityReached = yes > attendees.length / 2;
+    return { hostPlayer: host, nonHostPlayers: attendees, voteStats: { yes, no, undecided, majorityReached } };
   }, [players]);
 
   if (!networkSessionActive) {
     return (
-      <ThemedView style={styles.screen}>
-        <View style={styles.container}>
+      <SafeAreaView style={styles.safeArea}>
+        <ThemedView style={styles.screen}>
+          <ScrollView
+            contentContainerStyle={styles.container}
+            keyboardShouldPersistTaps="handled"
+            bounces={false}>
           <View style={styles.intro}>
             <ThemedText type="title">Host-Sitzung starten</ThemedText>
             <ThemedText style={styles.hint}>
@@ -56,19 +64,38 @@ export default function NetworkHostScreen() {
             />
             <PrimaryButton
               label="Sitzung erstellen"
-              onPress={() => {
-                startNetworkSession(hostName);
+              onPress={async () => {
+                if (isCreating) {
+                  return;
+                }
+                setIsCreating(true);
+                const result = await startNetworkSession(hostName);
+                if (!result.ok) {
+                  setErrorMessage(result.error ?? 'Sitzung konnte nicht erstellt werden.');
+                } else {
+                  setErrorMessage(null);
+                }
+                setIsCreating(false);
               }}
+              disabled={isCreating}
             />
+            {errorMessage ? (
+              <ThemedText style={styles.errorText}>{errorMessage}</ThemedText>
+            ) : null}
           </View>
-        </View>
-      </ThemedView>
+          </ScrollView>
+        </ThemedView>
+      </SafeAreaView>
     );
   }
 
   return (
-    <ThemedView style={styles.screen}>
-      <View style={styles.container}>
+    <SafeAreaView style={styles.safeArea}>
+      <ThemedView style={styles.screen}>
+        <ScrollView
+          contentContainerStyle={styles.container}
+          keyboardShouldPersistTaps="handled"
+          bounces={false}>
         <View style={styles.intro}>
           <ThemedText type="title">Lobby offen</ThemedText>
           <ThemedText style={styles.hint}>
@@ -100,17 +127,25 @@ export default function NetworkHostScreen() {
           <ThemedText style={styles.voteHint}>Aktuell eingestellt: {revealOnDeath ? 'Aufdecken' : 'Versteckt lassen'}</ThemedText>
         </View>
 
+        {hostPlayer ? (
+          <View style={[styles.hostCard, { backgroundColor: bgCard }]}>
+            <ThemedText type="subtitle">Host-Gerät</ThemedText>
+            <ThemedText type="defaultSemiBold">{hostPlayer.name || 'Host'}</ThemedText>
+            <ThemedText style={styles.hostHint}>Dieses Gerät moderiert und zählt nicht als Mitspielende Katze.</ThemedText>
+          </View>
+        ) : null}
+
         <View style={[styles.listCard, { backgroundColor: bgCard }]}> 
           <ThemedText type="subtitle">Teilnehmende ({playerCount})</ThemedText>
           <View style={styles.playerList}>
-            {players.map((player) => (
+            {nonHostPlayers.map((player) => (
               <PlayerRow
                 key={player.id}
                 name={player.name}
                 revealVote={player.revealVote}
-                onToggleVote={() =>
-                  updateRevealVote(player.id, !(player.revealVote ?? false))
-                }
+                onToggleVote={() => {
+                  void updateRevealVote(player.id, !(player.revealVote ?? false));
+                }}
                 canToggle={player.isHost}
               />
             ))}
@@ -126,16 +161,18 @@ export default function NetworkHostScreen() {
           <Pressable
             accessibilityRole="button"
             onPress={() => {
-              endNetworkSession();
-              router.replace('/setup/network');
+              void endNetworkSession().finally(() => {
+                router.replace('/setup/network');
+              });
             }}
             style={({ pressed }) => [styles.closeButton, { opacity: pressed ? 0.6 : 1 }]}
           >
             <ThemedText style={styles.closeLabel}>Sitzung schließen</ThemedText>
           </Pressable>
         </View>
-      </View>
-    </ThemedView>
+        </ScrollView>
+      </ThemedView>
+    </SafeAreaView>
   );
 }
 
@@ -174,13 +211,23 @@ function PlayerRow({
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
+  errorText: {
+    marginTop: 8,
+    textAlign: 'center',
+    color: '#ff9fbe',
+    fontSize: 13,
+  },
   screen: {
     flex: 1,
     padding: 24,
   },
   container: {
-    flex: 1,
+    flexGrow: 1,
     gap: 24,
+    paddingBottom: 32,
   },
   intro: {
     gap: 12,
@@ -241,6 +288,8 @@ const styles = StyleSheet.create({
   codeValue: {
     fontSize: 28,
     textAlign: 'center',
+    letterSpacing: 6,
+    paddingVertical: 4,
   },
   codeHint: {
     fontSize: 13,
@@ -261,6 +310,23 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   voteHint: {
+    fontSize: 13,
+    color: '#d8ffe8',
+  },
+  hostCard: {
+    borderRadius: 22,
+    padding: 20,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(135,255,134,0.24)',
+    backgroundColor: 'rgba(9,16,28,0.92)',
+    shadowColor: '#3aff9d',
+    shadowOpacity: 0.22,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 6,
+  },
+  hostHint: {
     fontSize: 13,
     color: '#d8ffe8',
   },

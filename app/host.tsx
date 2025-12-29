@@ -287,7 +287,15 @@ function RoleRevealModal({
             {assignment.playerName}
           </ThemedText>
           <ThemedText style={styles.modalOrder}>Reihenfolge #{assignment.order}</ThemedText>
-          <RoleCard role={role} />
+          <View style={styles.modalScrollContainer}>
+            <ScrollView
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled>
+              <RoleCard role={role} />
+            </ScrollView>
+          </View>
           <PrimaryButton label="Verstanden" onPress={onConfirm} />
           <Pressable
             accessibilityRole="button"
@@ -528,6 +536,23 @@ const styles = StyleSheet.create({
     shadowRadius: 36,
     shadowOffset: { width: 0, height: 20 },
     elevation: 8,
+    maxHeight: '90%',
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+    flexShrink: 1,
+  },
+  modalScrollContainer: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
+  },
+  modalScroll: {
+    flexGrow: 1,
+    flexShrink: 1,
+  },
+  modalScrollContent: {
+    paddingBottom: 8,
   },
   modalTitle: {
     textAlign: 'center',

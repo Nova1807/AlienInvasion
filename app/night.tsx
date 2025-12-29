@@ -2,10 +2,11 @@ import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, SafeAreaView, ScrollView, StyleSheet, View } from 'react-native';
 
+import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { useGame, type NightRecord } from '@/context/game-context';
 import { getRoleDefinition, type RoleId, type TeamId } from '@/constants/roles';
+import { useGame, type NightRecord } from '@/context/game-context';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { speakSequence, stop } from '@/utils/speech';
 
@@ -43,23 +44,39 @@ type CasualtyDetail = {
 export default function NightScreen() {
   const router = useRouter();
   const {
-    state: { roleCounts, players, playerCount, assignments, nightLog, round, revealOnDeath },
+    state: {
+      mode,
+      roleCounts,
+      players,
+      playerCount,
+      assignments,
+      nightLog,
+      round,
+      revealOnDeath,
+      networkNightActions,
+    },
     setPhase,
     startNightRound,
     setNightTarget,
     resolveNight,
+    broadcastNightStep,
   } = useGame();
 
   const [stepIndex, setStepIndex] = useState(0);
   const [isAdvancing, setIsAdvancing] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [pendingAlienTarget, setPendingAlienTarget] = useState<string | null>(null);
+  const isNetworkMode = mode === 'network';
 
   const exitDelayTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoAdvanceTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownValueRef = useRef<number | null>(null);
   const advancingRef = useRef(false);
   const entryStepKeyRef = useRef<string | null>(null);
   const seerAnnouncedRef = useRef<string | null>(null);
+  const alienTieAnnouncedRef = useRef(false);
+  const alienSelfVoteWarnedRef = useRef(false);
 
   const setAdvancing = useCallback((value: boolean) => {
     advancingRef.current = value;
@@ -85,7 +102,10 @@ export default function NightScreen() {
       clearInterval(countdownInterval.current);
       countdownInterval.current = null;
     }
-    setCountdown(null);
+    if (countdownValueRef.current !== null) {
+      countdownValueRef.current = null;
+      setCountdown(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -109,6 +129,12 @@ export default function NightScreen() {
       clearCountdown();
     };
   }, [clearAutoAdvance, clearCountdown, clearExitDelay, round, setPhase, startNightRound]);
+
+  useEffect(() => {
+    if (currentStep?.roleId !== 'alienKatze') {
+      setPendingAlienTarget(null);
+    }
+  }, [currentStep?.roleId]);
 
   const steps = useMemo(() => buildNightSteps(roleCounts, round), [roleCounts, round]);
   const currentStep = steps[stepIndex] ?? null;
@@ -150,11 +176,26 @@ export default function NightScreen() {
     return map;
   }, [assignments]);
 
+  const previousDoctorTarget = useMemo(() => {
+    const previousRecord = nightLog.find((entry) => entry.round === round - 1);
+    return previousRecord?.doctorTargetId ?? null;
+  }, [nightLog, round]);
+
+  const pendingAlienName = useMemo(() => {
+    if (!pendingAlienTarget) {
+      return null;
+    }
+    return getPlayerName(tablePlayers, pendingAlienTarget);
+  }, [pendingAlienTarget, tablePlayers]);
+
   const selectedTargetId = getSelectedId(currentNight, currentStep?.roleId);
-  const selectedTargetName = useMemo(
-    () => getPlayerName(tablePlayers, selectedTargetId),
-    [tablePlayers, selectedTargetId]
-  );
+  const selectedTargetName = useMemo(() => {
+    const targetId =
+      currentStep?.roleId === 'alienKatze'
+        ? pendingAlienTarget ?? selectedTargetId
+        : selectedTargetId;
+    return getPlayerName(tablePlayers, targetId);
+  }, [currentStep?.roleId, pendingAlienTarget, selectedTargetId, tablePlayers]);
 
   const seerInsight = useMemo<SeerInsight | null>(() => {
     if (!currentNight || currentNight.seerTargetId === null || currentNight.seerResultTeam === null) {
@@ -170,6 +211,76 @@ export default function NightScreen() {
       team: currentNight.seerResultTeam,
     };
   }, [currentNight, tablePlayers]);
+
+  const selectionCounts = useMemo(() => {
+    if (!isNetworkMode || currentStep?.roleId !== 'alienKatze') {
+      return {};
+    }
+    const counts: Record<string, number> = {};
+    assignments.forEach((assignment) => {
+      if (assignment.roleId === 'alienKatze' && assignment.alive) {
+        const action = networkNightActions[assignment.playerId];
+        if (action && action.round === round && action.stepId === currentStep.id && action.targetId) {
+          counts[action.targetId] = (counts[action.targetId] || 0) + 1;
+        }
+      }
+    });
+    return counts;
+  }, [assignments, isNetworkMode, currentStep?.roleId, currentStep?.id, networkNightActions, round]);
+
+  const networkStatusLines = useMemo(() => {
+    // Build a list of status lines for each alive alien indicating their current vote
+    // This should only be computed in network mode and when an alien step is active.
+    if (!isNetworkMode || !currentStep?.roleId) {
+      return [] as string[];
+    }
+    if (currentStep.roleId === 'alienKatze') {
+      const aliveAliens = assignments.filter(
+        (assignment) => assignment.roleId === 'alienKatze' && assignment.alive
+      );
+      if (aliveAliens.length === 0) {
+        return [] as string[];
+      }
+      return aliveAliens.map((assignment) => {
+        const action = networkNightActions[assignment.playerId];
+        if (!action || action.round !== round || action.stepId !== currentStep.id) {
+          return `${assignment.playerName}: wartet`;
+        }
+        if (action.confirmed && action.targetId) {
+          const targetName = getPlayerName(tablePlayers, action.targetId) ?? 'Unbekannt';
+          return `${assignment.playerName}: ${targetName} bestätigt`;
+        }
+        if (action.targetId) {
+          const targetName = getPlayerName(tablePlayers, action.targetId) ?? 'Unbekannt';
+          return `${assignment.playerName}: ${targetName} gewählt`;
+        }
+        return `${assignment.playerName}: wählen…`;
+      });
+    }
+    return [];
+  }, [
+    assignments,
+    currentStep?.id,
+    currentStep?.roleId,
+    isNetworkMode,
+    networkNightActions,
+    round,
+    tablePlayers,
+  ]);
+
+  // Prevent revealing alien identities and their choices on the host screen
+  // When aliens are acting, hide the status lines and selection counts entirely on the host.
+  const displayNetworkStatusLines = useMemo(() => {
+    if (isNetworkMode && currentStep?.roleId === 'alienKatze') {
+      return [] as string[];
+    }
+    return networkStatusLines;
+  }, [isNetworkMode, currentStep?.roleId, networkStatusLines]);
+
+  const showSelectionCounts = useMemo(() => {
+    // Only show vote counts when not in the alien voting step
+    return !(isNetworkMode && currentStep?.roleId === 'alienKatze');
+  }, [isNetworkMode, currentStep?.roleId]);
 
   const advanceStep = useCallback(
     (expectedIndex?: number) => {
@@ -262,6 +373,7 @@ export default function NightScreen() {
   const startCountdown = useCallback(
     (ms: number, expectedIndex: number) => {
       setCountdown(Math.max(1, Math.ceil(ms / 1000)));
+      countdownValueRef.current = Math.max(1, Math.ceil(ms / 1000));
       countdownInterval.current = setInterval(() => {
         setCountdown((prev) => {
           if (prev === null) {
@@ -272,9 +384,12 @@ export default function NightScreen() {
               clearInterval(countdownInterval.current);
               countdownInterval.current = null;
             }
+            countdownValueRef.current = 0;
             return 0;
           }
-          return prev - 1;
+          const next = prev - 1;
+          countdownValueRef.current = next;
+          return next;
         });
       }, 1000);
       autoAdvanceTimeout.current = setTimeout(() => {
@@ -288,6 +403,10 @@ export default function NightScreen() {
   );
 
   useEffect(() => {
+    countdownValueRef.current = countdown;
+  }, [countdown]);
+
+  useEffect(() => {
     if (!currentStep) {
       return;
     }
@@ -299,11 +418,24 @@ export default function NightScreen() {
     setAdvancing(false);
     clearAutoAdvance();
     clearCountdown();
+    alienTieAnnouncedRef.current = false;
+    alienSelfVoteWarnedRef.current = false;
     const entryLines =
       currentStep.enterSpeech && currentStep.enterSpeech.length > 0
         ? currentStep.enterSpeech
         : [currentStep.description];
     const stepIndexSnapshot = stepIndex;
+    if (isNetworkMode) {
+      void broadcastNightStep({
+        round,
+        stepIndex: stepIndexSnapshot,
+        stepId: currentStep.id,
+        title: currentStep.title,
+        description: currentStep.description,
+        roleId: currentStep.roleId ?? null,
+        allowTargetSelection: Boolean(currentStep.allowTargetSelection),
+      });
+    }
     speakSequence(entryLines, {
       onComplete: () => {
         if (currentStep.allowTargetSelection) {
@@ -325,7 +457,9 @@ export default function NightScreen() {
     advanceStep,
     clearAutoAdvance,
     clearCountdown,
+    broadcastNightStep,
     currentStep,
+    isNetworkMode,
     round,
     setAdvancing,
     startCountdown,
@@ -338,6 +472,14 @@ export default function NightScreen() {
     }
     if (!currentStep?.allowTargetSelection) {
       return;
+    }
+    if (currentStep.roleId === 'alienKatze') {
+      if (pendingAlienTarget) {
+        return;
+      }
+      if (!selectedTargetId) {
+        return;
+      }
     }
     if (!selectedTargetId) {
       return;
@@ -365,11 +507,125 @@ export default function NightScreen() {
     clearCountdown,
     currentStep?.allowTargetSelection,
     currentStep?.roleId,
+    pendingAlienTarget,
     seerInsight,
     selectedTargetId,
     setAdvancing,
     startCountdown,
     stepIndex,
+  ]);
+
+  useEffect(() => {
+    if (!isNetworkMode) {
+      return;
+    }
+    const roleId = currentStep?.roleId;
+    const stepId = currentStep?.id;
+    if (!roleId || !stepId) {
+      return;
+    }
+    if (roleId === 'alienKatze') {
+      const aliveAliens = assignments.filter(
+        (assignment) => assignment.roleId === 'alienKatze' && assignment.alive
+      );
+      if (aliveAliens.length === 0) {
+        return;
+      }
+      const threshold = Math.floor(aliveAliens.length / 2) + 1;
+      const voteCounts = new Map<string, number>();
+      let validVoteFound = false;
+      aliveAliens.forEach((assignment) => {
+        const action = networkNightActions[assignment.playerId];
+        if (
+          !action ||
+          action.round !== round ||
+          action.stepId !== stepId ||
+          !action.confirmed ||
+          !action.targetId
+        ) {
+          return;
+        }
+        const targetAssignment = assignmentByPlayerId[action.targetId];
+        if (targetAssignment?.roleId === 'alienKatze') {
+          if (!alienSelfVoteWarnedRef.current) {
+            alienSelfVoteWarnedRef.current = true;
+            speakSequence(['Nein Alien, ihr könnt keine Verbündeten opfern.']);
+          }
+          return;
+        }
+        voteCounts.set(action.targetId, (voteCounts.get(action.targetId) ?? 0) + 1);
+        validVoteFound = true;
+      });
+      if (!validVoteFound) {
+        return;
+      }
+      let leadingTarget: string | null = null;
+      let topCount = 0;
+      let tie = false;
+      voteCounts.forEach((count, targetId) => {
+        if (count > topCount) {
+          leadingTarget = targetId;
+          topCount = count;
+          tie = false;
+        } else if (count === topCount) {
+          tie = true;
+        }
+      });
+      if (topCount >= threshold && leadingTarget) {
+        if (selectedTargetId !== leadingTarget) {
+          setNightTarget('alienKatze', leadingTarget);
+        }
+        setPendingAlienTarget(null);
+        alienTieAnnouncedRef.current = false;
+        alienSelfVoteWarnedRef.current = false;
+        return;
+      }
+      if (tie && !alienTieAnnouncedRef.current) {
+        alienTieAnnouncedRef.current = true;
+        speakSequence(['Einigt euch auf ein Opfer.']);
+        setNightTarget('alienKatze', null);
+        setPendingAlienTarget(null);
+        return;
+      }
+      if (pendingAlienTarget && !voteCounts.has(pendingAlienTarget)) {
+        setPendingAlienTarget(null);
+      }
+      alienSelfVoteWarnedRef.current = false;
+      return;
+    }
+    let latestAction: (typeof networkNightActions)[string] | null = null;
+    assignments.forEach((assignment) => {
+      if (assignment.roleId !== roleId || !assignment.alive) {
+        return;
+      }
+      const action = networkNightActions[assignment.playerId];
+      if (!action) {
+        return;
+      }
+      if (action.round !== round || action.stepId !== stepId) {
+        return;
+      }
+      if (!latestAction || action.updatedAt > latestAction.updatedAt) {
+        latestAction = action;
+      }
+    });
+    if (!latestAction || !latestAction.confirmed || !latestAction.targetId) {
+      return;
+    }
+    if (selectedTargetId !== latestAction.targetId) {
+      setNightTarget(roleId, latestAction.targetId);
+    }
+  }, [
+    assignmentByPlayerId,
+    assignments,
+    currentStep?.id,
+    currentStep?.roleId,
+    isNetworkMode,
+    networkNightActions,
+    pendingAlienTarget,
+    round,
+    selectedTargetId,
+    setNightTarget,
   ]);
 
   const handleSelect = (playerId: string) => {
@@ -382,6 +638,14 @@ export default function NightScreen() {
         speakSequence(['Nein Alien, du darfst dich nicht selbst umbringen.']);
         return;
       }
+      setPendingAlienTarget((prev) => (prev === playerId ? null : playerId));
+      return;
+    }
+    if (currentStep.roleId === 'doktor') {
+      if (previousDoctorTarget && previousDoctorTarget === playerId) {
+        speakSequence(['Doktor, du kannst dieselbe Katze nicht zwei Nächte hintereinander schützen.']);
+        return;
+      }
     }
     if (currentStep.roleId === 'seher' && seerPlayerId && playerId === seerPlayerId) {
       speakSequence(['Du kennst deine eigene Karte bereits.']);
@@ -390,8 +654,23 @@ export default function NightScreen() {
     setNightTarget(currentStep.roleId, playerId);
   };
 
+  const handleAlienConfirm = () => {
+    if (!currentStep || currentStep.roleId !== 'alienKatze' || !pendingAlienTarget) {
+      return;
+    }
+    const targetId = pendingAlienTarget;
+    setPendingAlienTarget(null);
+    setNightTarget('alienKatze', targetId);
+  };
+
   const allowTargetSelection = currentStep?.allowTargetSelection ?? false;
-  const selectionEnabled = allowTargetSelection && !isAdvancing;
+  const selectionEnabled = allowTargetSelection && !isAdvancing && !isNetworkMode;
+  const tableHighlightColor = currentStep?.roleId === 'alienKatze' ? '#ff7aa6' : undefined;
+  const effectiveSelectedId = isNetworkMode
+    ? null
+    : currentStep?.roleId === 'alienKatze'
+    ? pendingAlienTarget ?? selectedTargetId
+    : selectedTargetId;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -409,18 +688,44 @@ export default function NightScreen() {
 
         <NightTable
           players={tablePlayers}
-          selectedId={selectedTargetId}
+          selectedId={effectiveSelectedId}
           allowSelection={selectionEnabled}
           onSelect={selectionEnabled ? handleSelect : undefined}
+          highlightColor={tableHighlightColor}
+          selectionCounts={showSelectionCounts ? selectionCounts : undefined}
         />
+
+        {currentStep?.roleId === 'alienKatze' && !isNetworkMode ? (
+          <View
+            style={[
+              styles.alienConfirm,
+              tableHighlightColor
+                ? { borderColor: 'rgba(255,122,166,0.35)', shadowColor: 'rgba(255,122,166,0.25)' }
+                : undefined,
+            ]}>
+            <ThemedText style={styles.alienConfirmText}>
+              {pendingAlienName
+                ? `${pendingAlienName} umbringen?`
+                : 'Tippt auf eine Katze und bestätigt eure Wahl.'}
+            </ThemedText>
+            <PrimaryButton
+              label={
+                pendingAlienName ? `${pendingAlienName} umbringen` : 'Bestätigen'
+              }
+              onPress={handleAlienConfirm}
+              disabled={!pendingAlienTarget}
+            />
+          </View>
+        ) : null}
 
         {currentStep ? (
           <NightStepCard
             step={currentStep}
             selectedTargetName={selectedTargetName}
-            seerInsight={seerInsight}
+            seerInsight={isNetworkMode ? null : seerInsight}
             advancing={isAdvancing}
             countdown={countdown}
+            networkStatusLines={displayNetworkStatusLines}
           />
         ) : null}
 
@@ -526,12 +831,14 @@ function NightStepCard({
   seerInsight,
   advancing,
   countdown,
+  networkStatusLines,
 }: {
   step: NightStep;
   selectedTargetName: string | null;
   seerInsight: SeerInsight | null;
   advancing: boolean;
   countdown: number | null;
+  networkStatusLines?: string[];
 }) {
   const cardBg = useThemeColor({ light: 'rgba(9,16,28,0.94)', dark: 'rgba(9,16,28,0.94)' }, 'background');
   const cardBorder = useThemeColor(
@@ -579,6 +886,13 @@ function NightStepCard({
       {selectionHint ? <ThemedText style={styles.stepHint}>{selectionHint}</ThemedText> : null}
       {waitingHint ? <ThemedText style={styles.stepHint}>{waitingHint}</ThemedText> : null}
       {countdownHint ? <ThemedText style={styles.stepHint}>{countdownHint}</ThemedText> : null}
+      {networkStatusLines && networkStatusLines.length > 0
+        ? networkStatusLines.map((line, index) => (
+            <ThemedText key={`${line}-${index}`} style={styles.stepHint}>
+              {line}
+            </ThemedText>
+          ))
+        : null}
       {step.roleId === 'seher' && seerResultText ? (
         <ThemedText style={[styles.seerResultBase, seerResultStyle]}>{seerResultText}</ThemedText>
       ) : null}
@@ -586,47 +900,85 @@ function NightStepCard({
   );
 }
 
+type TableLayout = {
+  size: number;
+  seatWidth: number;
+  seatHeight: number;
+  radius: number;
+  fontSize: number;
+};
+
+function computeTableLayout(count: number): TableLayout {
+  if (count <= 0) {
+    return { size: 300, seatWidth: 110, seatHeight: 66, radius: 134, fontSize: 13 };
+  }
+  const baseSize = 320;
+  const maxSize = 420;
+  const extra = Math.max(0, count - 8);
+  const size = Math.min(maxSize, baseSize + extra * 12);
+  const maxSeatWidth = 122;
+  const minSeatWidth = 64;
+  const padding = 24;
+  const baseRadius = Math.max(size / 2 - padding, 80);
+  const circumference = 2 * Math.PI * baseRadius;
+  const availablePerSeat = circumference / count;
+  const seatWidth = Math.min(maxSeatWidth, Math.max(minSeatWidth, availablePerSeat - 12));
+  const seatHeight = Math.max(48, seatWidth * 0.64);
+  const radius = Math.max(size / 2 - seatHeight / 2 - 16, 60);
+  const fontSize = count > 12 ? 11 : count > 9 ? 12 : 13;
+  return { size, seatWidth, seatHeight, radius, fontSize };
+}
+
 function NightTable({
   players,
   selectedId,
   allowSelection,
   onSelect,
+  highlightColor,
+  selectionCounts,
 }: {
   players: TablePlayer[];
   selectedId: string | null;
   allowSelection: boolean;
   onSelect?: (id: string) => void;
+  highlightColor?: string;
+  selectionCounts?: Record<string, number>;
 }) {
-  const border = useThemeColor(
+  const layout = useMemo(() => computeTableLayout(players.length), [players.length]);
+  const nameBg = useThemeColor({ light: 'rgba(7,16,28,0.92)', dark: 'rgba(7,16,28,0.92)' }, 'background');
+  const defaultBorder = useThemeColor(
     { light: 'rgba(135,255,134,0.35)', dark: 'rgba(135,255,134,0.35)' },
     'tint'
   );
-  const highlight = useThemeColor({ light: '#87ff86', dark: '#87ff86' }, 'tint');
-  const nameBg = useThemeColor({ light: 'rgba(7,16,28,0.92)', dark: 'rgba(7,16,28,0.92)' }, 'background');
+  const ringBorderColor = highlightColor ? 'rgba(255,122,166,0.42)' : defaultBorder;
+  const defaultHighlight = useThemeColor({ light: '#87ff86', dark: '#87ff86' }, 'tint');
+  const selectionHighlight = highlightColor ?? defaultHighlight;
+  const idleBorderColor = highlightColor ? 'rgba(255,122,166,0.22)' : 'rgba(135,255,134,0.16)';
+  const seatShadowColor = highlightColor ?? '#1fff76';
+  const seatTextStyle = useMemo(
+    () => ({ fontSize: layout.fontSize, lineHeight: layout.fontSize + 3 }),
+    [layout.fontSize]
+  );
 
   const positioned = useMemo(() => {
     if (players.length === 0) {
       return [];
     }
-    const size = 300;
-    const seatWidth = 110;
-    const seatHeight = 66;
-    const radius = size / 2 - Math.max(seatWidth, seatHeight) / 2 - 6;
     return players.map((player, index) => {
       const angle = players.length === 1 ? -Math.PI / 2 : (index / players.length) * Math.PI * 2 - Math.PI / 2;
-      const x = size / 2 + radius * Math.cos(angle) - seatWidth / 2;
-      const y = size / 2 + radius * Math.sin(angle) - seatHeight / 2;
+      const x = layout.size / 2 + layout.radius * Math.cos(angle) - layout.seatWidth / 2;
+      const y = layout.size / 2 + layout.radius * Math.sin(angle) - layout.seatHeight / 2;
       return {
         ...player,
         style: {
           left: x,
           top: y,
-          width: seatWidth,
-          height: seatHeight,
+          width: layout.seatWidth,
+          height: layout.seatHeight,
         },
       };
     });
-  }, [players]);
+  }, [layout, players]);
 
   if (players.length === 0) {
     return (
@@ -639,10 +991,22 @@ function NightTable({
   }
 
   return (
-    <View style={styles.tableWrapper}>
-      <View style={[styles.tableCircle, { borderColor: border }]}>
+    <View style={[styles.tableWrapper, { minHeight: layout.size }]}>
+      <View
+        style={[
+          styles.tableCircle,
+          {
+            borderColor: ringBorderColor,
+            width: layout.size,
+            height: layout.size,
+            borderRadius: layout.size / 2,
+            shadowColor: highlightColor ? highlightColor : '#2cff9d',
+          },
+        ]}>
         {positioned.map((entry) => {
           const isSelected = entry.id === selectedId;
+          const votes = selectionCounts?.[entry.id] ?? 0;
+          const hasGroupSelection = votes > 0;
           const canSelect = allowSelection && Boolean(onSelect) && entry.alive;
           return (
             <Pressable
@@ -655,15 +1019,25 @@ function NightTable({
                 !entry.alive && styles.tableSeatDead,
                 {
                   backgroundColor: entry.alive ? nameBg : 'rgba(32,20,44,0.6)',
-                  borderColor: isSelected ? highlight : 'rgba(135,255,134,0.16)',
+                  borderColor: isSelected
+                    ? selectionHighlight
+                    : hasGroupSelection
+                    ? 'rgba(255,122,166,0.5)'
+                    : idleBorderColor,
                   opacity: pressed && canSelect ? 0.82 : entry.alive ? 1 : 0.45,
+                  shadowColor: isSelected || hasGroupSelection ? (highlightColor ?? '#ff7aa6') : seatShadowColor,
                 },
               ]}>
               <ThemedText
-                style={[styles.tableSeatText, !entry.alive && styles.tableSeatTextDead]}
+                style={[styles.tableSeatText, seatTextStyle, !entry.alive && styles.tableSeatTextDead]}
                 numberOfLines={2}>
                 {entry.name}
               </ThemedText>
+              {hasGroupSelection ? (
+                <View style={styles.tableSeatBadge}>
+                  <ThemedText style={styles.tableSeatBadgeText}>{votes}</ThemedText>
+                </View>
+              ) : null}
             </Pressable>
           );
         })}
@@ -813,15 +1187,11 @@ const styles = StyleSheet.create({
   tableSeat: {
     position: 'absolute',
     borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
     borderWidth: 2,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#1fff76',
-    shadowOpacity: 0.18,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 12 },
     elevation: 4,
   },
   tableSeatDead: {
@@ -836,6 +1206,23 @@ const styles = StyleSheet.create({
   tableSeatTextDead: {
     textDecorationLine: 'line-through',
     opacity: 0.65,
+  },
+  tableSeatBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,122,166,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  tableSeatBadgeText: {
+    color: '#090f1a',
+    fontSize: 12,
+    fontWeight: '700',
   },
   stepCard: {
     borderRadius: 24,
@@ -875,5 +1262,24 @@ const styles = StyleSheet.create({
   backLabel: {
     color: '#87ff86',
     fontSize: 14,
+  },
+  alienConfirm: {
+    marginTop: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(135,255,134,0.25)',
+    backgroundColor: 'rgba(9,16,28,0.92)',
+    padding: 16,
+    gap: 12,
+    shadowColor: '#1fff76',
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 4,
+  },
+  alienConfirmText: {
+    textAlign: 'center',
+    fontSize: 14,
+    color: '#d8ffe8',
   },
 });

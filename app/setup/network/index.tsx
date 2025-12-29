@@ -25,8 +25,9 @@ export default function NetworkModeLandingScreen() {
           <PrimaryButton
             label="Sitzung als Host starten"
             onPress={() => {
-              endNetworkSession();
-              router.push('/setup/network/host');
+              void endNetworkSession().finally(() => {
+                router.push('/setup/network/host');
+              });
             }}
           />
           <PrimaryButton

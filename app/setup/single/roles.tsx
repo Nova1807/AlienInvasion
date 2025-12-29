@@ -1,12 +1,14 @@
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { SafeAreaView, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, Modal, Pressable, SafeAreaView, ScrollView, StyleSheet, View } from 'react-native';
 
 import { NumberStepper } from '@/components/number-stepper';
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { selectableRoles } from '@/constants/roles';
+import { selectableRoles, type RoleDefinition } from '@/constants/roles';
+import { RoleArtworks } from '@/constants/role-artwork';
+import { RoleCard } from '@/components/role-card';
 import { useGame } from '@/context/game-context';
 import { useThemeColor } from '@/hooks/use-theme-color';
 
@@ -20,6 +22,7 @@ export default function SingleRolesScreen() {
   } = useGame();
 
   const [localErrors, setLocalErrors] = useState<string[]>([]);
+  const [infoRole, setInfoRole] = useState<RoleDefinition | null>(null);
 
   const totalAssigned = useMemo(
     () => setupSummary.nonCrewSelected + setupSummary.crewCount,
@@ -80,75 +83,127 @@ export default function SingleRolesScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ThemedView style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.intro}>
-          <ThemedText type="title">Rollen im Dorf</ThemedText>
-          <ThemedText style={styles.hint}>
-            Wähle, welche Spezialrollen teilnehmen. Dorfkatzen ergänzt die App automatisch anhand der freien Plätze.
-          </ThemedText>
-        </View>
-
-        <ThemedText style={styles.detail}>
-          Aktuell sind {totalAssigned}/{playerCount} Plätze vergeben. {dorfLabel} kommen automatisch
-          dazu.
-        </ThemedText>
-
-        {mode === 'single' ? null : (
-          <View style={[styles.revealInfo, { backgroundColor: panelBg }]}> 
-            <ThemedText type="defaultSemiBold">Abstimmung der Lobby</ThemedText>
-            <ThemedText style={styles.revealHint}>
-              Aktuell eingestellt: {revealOnDeath ? 'Karten werden gezeigt' : 'Karten bleiben verdeckt'}
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
+          <View style={styles.intro}>
+            <ThemedText type="title">Rollen im Dorf</ThemedText>
+            <ThemedText style={styles.hint}>
+              Wähle, welche Spezialrollen teilnehmen. Dorfkatzen ergänzt die App automatisch anhand der freien Plätze.
             </ThemedText>
           </View>
-        )}
 
-        <View style={styles.roleGrid}>
-          {selectableRoles.map((role) => {
-            const currentCount = roleCounts[role.id] ?? 0;
-            const min = role.minCount ?? 0;
-            const otherSelected = setupSummary.nonCrewSelected - currentCount;
-            const remainingSlots = Math.max(playerCount - otherSelected, 0);
-            const maxByRule = typeof role.maxCount === 'number' ? role.maxCount : remainingSlots;
-            const max =
-              role.id === 'alienKatze'
-                ? Math.min(maxByRule, playerCount - 1)
-                : Math.min(maxByRule, remainingSlots);
-            return (
-              <View key={role.id} style={[styles.roleCard, { backgroundColor: cardBg }]}> 
-                <ThemedText type="defaultSemiBold">{role.name}</ThemedText>
-                <ThemedText style={styles.roleTagline}>{role.tagline}</ThemedText>
-                <RoleStepper
-                  value={currentCount}
-                  min={min}
-                  max={Math.max(min, max)}
-                  onChange={(value) => handleRoleChange(role.id, value)}
-                />
-                <ThemedText style={styles.roleLimit}>
-                  Min {min} • Max {Number.isFinite(max) ? max : '∞'}
-                </ThemedText>
-              </View>
-            );
-          })}
-        </View>
+          <ThemedText style={styles.detail}>
+            Aktuell sind {totalAssigned}/{playerCount} Plätze vergeben. {dorfLabel} kommen automatisch
+            dazu.
+          </ThemedText>
 
-        {errorsToShow.length > 0 ? (
-          <View style={styles.errorBox}>
-            {errorsToShow.map((error, index) => (
-              <ThemedText key={index} style={styles.errorText}>
-                • {error}
+          {mode === 'single' ? null : (
+            <View style={[styles.revealInfo, { backgroundColor: panelBg }]}>
+              <ThemedText type="defaultSemiBold">Abstimmung der Lobby</ThemedText>
+              <ThemedText style={styles.revealHint}>
+                Aktuell eingestellt: {revealOnDeath ? 'Karten werden gezeigt' : 'Karten bleiben verdeckt'}
               </ThemedText>
-            ))}
-          </View>
-        ) : null}
+            </View>
+          )}
 
-        <PrimaryButton
-          label="Rollen zufällig verteilen"
-          onPress={handleGenerate}
-          disabled={!isReady}
-          accessibilityHint="Erstellt das verdeckte Rollen-Deck und öffnet die passende Ansicht."
-        />
-      </ScrollView>
-    </ThemedView>
+          <View style={styles.roleGrid}>
+            {selectableRoles.map((role) => {
+              const currentCount = roleCounts[role.id] ?? 0;
+              const min = role.minCount ?? 0;
+              const otherSelected = setupSummary.nonCrewSelected - currentCount;
+              const remainingSlots = Math.max(playerCount - otherSelected, 0);
+              const maxByRule = typeof role.maxCount === 'number' ? role.maxCount : remainingSlots;
+              const max =
+                role.id === 'alienKatze'
+                  ? Math.min(maxByRule, playerCount - 1)
+                  : Math.min(maxByRule, remainingSlots);
+              return (
+                <View key={role.id} style={[styles.roleCard, { backgroundColor: cardBg }]}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setInfoRole(role)}
+                    style={({ pressed }) => [
+                      styles.roleArtwork,
+                      { opacity: pressed ? 0.85 : 1 },
+                    ]}>
+                    {(() => {
+                      const previews = RoleArtworks[role.id] ?? [];
+                      const previewSource = previews[0] ?? null;
+                      if (previewSource) {
+                        return (
+                          <Image
+                            source={previewSource}
+                            style={styles.roleImage}
+                            resizeMode="contain"
+                            accessibilityIgnoresInvertColors
+                          />
+                        );
+                      }
+                      return (
+                        <View style={styles.roleArtworkFallback}>
+                          <ThemedText type="title" style={styles.roleFallbackLetter}>
+                            {role.name.charAt(0)}
+                          </ThemedText>
+                        </View>
+                      );
+                    })()}
+                  </Pressable>
+                  <ThemedText type="defaultSemiBold" style={styles.roleName}>
+                    {role.name}
+                  </ThemedText>
+                  <RoleStepper
+                    value={currentCount}
+                    min={min}
+                    max={Math.max(min, max)}
+                    onChange={(value) => handleRoleChange(role.id, value)}
+                  />
+                </View>
+              );
+            })}
+          </View>
+
+          {errorsToShow.length > 0 ? (
+            <View style={styles.errorBox}>
+              {errorsToShow.map((error, index) => (
+                <ThemedText key={index} style={styles.errorText}>
+                  • {error}
+                </ThemedText>
+              ))}
+            </View>
+          ) : null}
+
+          <PrimaryButton
+            label="Rollen zufällig verteilen"
+            onPress={handleGenerate}
+            disabled={!isReady}
+            accessibilityHint="Erstellt das verdeckte Rollen-Deck und öffnet die passende Ansicht."
+          />
+        </ScrollView>
+      </ThemedView>
+      <Modal
+        transparent
+        animationType="fade"
+        visible={infoRole !== null}
+        onRequestClose={() => setInfoRole(null)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalScrollContainer}>
+              <ScrollView
+                style={styles.modalScroll}
+                contentContainerStyle={styles.modalScrollContent}
+                showsVerticalScrollIndicator={false}
+                nestedScrollEnabled>
+                {infoRole ? <RoleCard role={infoRole} /> : null}
+              </ScrollView>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setInfoRole(null)}
+              style={({ pressed }) => [styles.modalClose, { opacity: pressed ? 0.7 : 1 }]}>
+              <ThemedText style={styles.modalCloseLabel}>Schließen</ThemedText>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -172,6 +227,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   screen: {
+    flex: 1,
+  },
+  scroll: {
     flex: 1,
   },
   container: {
@@ -217,9 +275,11 @@ const styles = StyleSheet.create({
   },
   roleCard: {
     width: '48%',
+    maxWidth: '48%',
+    flexBasis: '48%',
     borderRadius: 20,
-    padding: 16,
-    gap: 8,
+    padding: 14,
+    gap: 14,
     backgroundColor: 'rgba(9,16,28,0.92)',
     borderWidth: 1,
     borderColor: 'rgba(135,255,134,0.24)',
@@ -230,14 +290,36 @@ const styles = StyleSheet.create({
     elevation: 4,
     marginBottom: 16,
   },
-  roleTagline: {
-    fontSize: 12,
-    lineHeight: 18,
-    color: '#d8ffe8',
+  roleArtwork: {
+    width: '100%',
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: 'rgba(135,255,134,0.35)',
+    overflow: 'hidden',
+    backgroundColor: 'rgba(135,255,134,0.12)',
+    alignItems: 'center',
+    padding: 6,
+    shadowColor: '#3aff9d',
+    shadowOpacity: 0.24,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 5,
   },
-  roleLimit: {
-    fontSize: 11,
-    color: '#9beab4',
+  roleImage: {
+    width: '100%',
+    height: 180,
+  },
+  roleArtworkFallback: {
+    width: '100%',
+    height: 200,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roleFallbackLetter: {
+    color: '#87ff86',
+  },
+  roleName: {
+    textAlign: 'center',
   },
   errorBox: {
     borderRadius: 16,
@@ -250,5 +332,52 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#ff9fbe',
     fontSize: 13,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(4,7,15,0.92)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    borderRadius: 24,
+    padding: 20,
+    backgroundColor: 'rgba(9,16,28,0.96)',
+    borderWidth: 1,
+    borderColor: 'rgba(135,255,134,0.28)',
+    shadowColor: '#3aff9d',
+    shadowOpacity: 0.3,
+    shadowRadius: 36,
+    shadowOffset: { width: 0, height: 20 },
+    elevation: 8,
+    maxHeight: '88%',
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+    flexShrink: 1,
+    flexGrow: 0,
+    minHeight: 0,
+  },
+  modalScrollContainer: {
+    flex: 1,
+    minHeight: 0,
+    marginBottom: 18,
+  },
+  modalScroll: {
+    flexGrow: 1,
+    flexShrink: 1,
+    width: '100%',
+    maxHeight: '100%',
+    minHeight: 0,
+  },
+  modalScrollContent: {
+    paddingBottom: 18,
+  },
+  modalClose: {
+    alignItems: 'center',
+  },
+  modalCloseLabel: {
+    color: '#87ff86',
+    fontSize: 14,
   },
 });

@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, SafeAreaView, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
@@ -10,15 +10,13 @@ import { useThemeColor } from '@/hooks/use-theme-color';
 
 export default function NetworkJoinScreen() {
   const router = useRouter();
-  const {
-    state: { networkSessionActive, networkSessionCode },
-    joinNetworkSession,
-  } = useGame();
+  const { joinNetworkSession, linkNetworkSession } = useGame();
 
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [vote, setVote] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
+  const [isJoining, setIsJoining] = useState(false);
 
   const cardBg = useThemeColor({ light: 'rgba(9,16,28,0.92)', dark: 'rgba(9,16,28,0.92)' }, 'background');
   const border = useThemeColor({ light: 'rgba(135,255,134,0.28)', dark: 'rgba(135,255,134,0.28)' }, 'tint');
@@ -26,26 +24,42 @@ export default function NetworkJoinScreen() {
   const textColor = useThemeColor({}, 'text');
 
   const handleJoin = () => {
-    if (!networkSessionActive || !networkSessionCode) {
-      setMessage('Aktuell ist keine Lobby geöffnet. Bitte den Host darum bitten.');
+    if (isJoining) {
       return;
     }
-    if (code.trim().toUpperCase() !== networkSessionCode.toUpperCase()) {
-      setMessage('Code stimmt nicht. Prüfe die Eingabe.');
-      return;
-    }
-    const result = joinNetworkSession(name, vote);
-    if (!result.ok) {
-      setMessage(result.error ?? 'Teilnahme fehlgeschlagen.');
-      return;
-    }
-    setMessage('Erfolgreich eingetragen!');
-    setName('');
+    setIsJoining(true);
+    setMessage(null);
+    void (async () => {
+      const result = await joinNetworkSession(code, name, vote);
+      if (!result.ok) {
+        setMessage(result.error ?? 'Teilnahme fehlgeschlagen.');
+        setIsJoining(false);
+        return;
+      }
+      if (!result.sessionId) {
+        setMessage('Sitzung konnte nicht verknüpft werden.');
+        setIsJoining(false);
+        return;
+      }
+      const linkResult = await linkNetworkSession({
+        sessionId: result.sessionId,
+        code: result.code ?? code.trim().toUpperCase(),
+        localPlayerId: result.playerId ?? null,
+      });
+      if (!linkResult.ok) {
+        setMessage(linkResult.error ?? 'Verbindung zur Lobby fehlgeschlagen.');
+        setIsJoining(false);
+        return;
+      }
+      setIsJoining(false);
+      router.replace('/setup/network/player');
+    })();
   };
 
   return (
-    <ThemedView style={styles.screen}>
-      <View style={styles.container}>
+    <SafeAreaView style={styles.safeArea}>
+      <ThemedView style={styles.screen}>
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <View style={styles.intro}>
           <ThemedText type="title">Lobby beitreten</ThemedText>
           <ThemedText style={styles.hint}>
@@ -55,6 +69,7 @@ export default function NetworkJoinScreen() {
         </View>
 
         <View style={[styles.formCard, { backgroundColor: cardBg }]}>
+
           <ThemedText style={styles.label}>Raum-Code</ThemedText>
           <TextInput
             value={code}
@@ -83,7 +98,11 @@ export default function NetworkJoinScreen() {
             <VoteButton label="Nein" active={vote === false} onPress={() => setVote(false)} />
           </View>
 
-          <PrimaryButton label="Beitreten" onPress={handleJoin} disabled={!name.trim()} />
+          <PrimaryButton
+            label="Beitreten"
+            onPress={handleJoin}
+            disabled={!name.trim() || !code.trim() || isJoining}
+          />
 
           {message ? (
             <ThemedText style={styles.message}>{message}</ThemedText>
@@ -97,8 +116,9 @@ export default function NetworkJoinScreen() {
         >
           <ThemedText style={styles.backLabel}>Zurück</ThemedText>
         </Pressable>
-      </View>
-    </ThemedView>
+        </ScrollView>
+      </ThemedView>
+    </SafeAreaView>
   );
 }
 
@@ -132,12 +152,15 @@ function VoteButton({
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
   screen: {
     flex: 1,
     padding: 24,
   },
   container: {
-    flex: 1,
+    flexGrow: 1,
     gap: 24,
   },
   intro: {

@@ -6,7 +6,7 @@ import { ThemedText } from './themed-text';
 
 type PrimaryButtonProps = {
   label: string;
-  onPress: () => void;
+  onPress?: () => void;
   accessibilityHint?: string;
   disabled?: boolean;
 };
@@ -20,7 +20,7 @@ export function PrimaryButton({ label, onPress, accessibilityHint, disabled }: P
       accessibilityRole="button"
       accessibilityState={{ disabled }}
       disabled={disabled}
-      onPress={disabled ? undefined : onPress}
+  onPress={disabled || !onPress ? undefined : onPress}
       style={({ pressed }) => [
         styles.button,
         {

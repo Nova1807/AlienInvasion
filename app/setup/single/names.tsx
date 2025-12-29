@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { SafeAreaView, StyleSheet, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, SafeAreaView, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
@@ -16,35 +16,44 @@ export default function SingleNamesScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ThemedView style={styles.screen}>
-        <View style={styles.container}>
-        <View style={styles.intro}>
-          <ThemedText type="title">Wie heißen die Mitspielenden?</ThemedText>
-          <ThemedText style={styles.hint}>
-            Jede Person wird beim Enthüllen namentlich aufgerufen. Lasse Eingaben frei, falls der
-            Name offen bleiben soll.
-          </ThemedText>
-        </View>
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoider}
+        behavior={Platform.select({ ios: 'padding', android: undefined })}
+        keyboardVerticalOffset={Platform.select({ ios: 24, android: 0 })}>
+        <ThemedView style={styles.screen}>
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.container}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}>
+          <View style={styles.intro}>
+            <ThemedText type="title">Wie heißen die Mitspielenden?</ThemedText>
+            <ThemedText style={styles.hint}>
+              Jede Person wird beim Enthüllen namentlich aufgerufen. Lasse Eingaben frei, falls der
+              Name offen bleiben soll.
+            </ThemedText>
+          </View>
 
-        <View style={styles.list}>
-          {players.slice(0, playerCount).map((player, index) => (
-            <PlayerNameRow
-              key={player.id}
-              index={index}
-              value={player.name}
-              onChange={(text) => setPlayerName(index, text)}
+          <View style={styles.list}>
+            {players.slice(0, playerCount).map((player, index) => (
+              <PlayerNameRow
+                key={player.id}
+                index={index}
+                value={player.name}
+                onChange={(text) => setPlayerName(index, text)}
+              />
+            ))}
+          </View>
+
+          <View style={styles.actions}>
+            <PrimaryButton
+              label="Weiter"
+              onPress={() => router.push('/setup/single/roles')}
             />
-          ))}
-        </View>
-
-        <View style={styles.actions}>
-          <PrimaryButton
-            label="Weiter"
-            onPress={() => router.push('/setup/single/roles')}
-          />
-        </View>
-      </View>
-    </ThemedView>
+          </View>
+        </ScrollView>
+      </ThemedView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -87,9 +96,16 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 24,
   },
-  container: {
+  keyboardAvoider: {
     flex: 1,
+  },
+  scroll: {
+    flex: 1,
+  },
+  container: {
+    flexGrow: 1,
     gap: 24,
+    paddingBottom: 32,
   },
   intro: {
     gap: 12,
@@ -123,5 +139,6 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: 12,
+    paddingBottom: 24,
   },
 });

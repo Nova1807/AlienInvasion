@@ -9,7 +9,7 @@ import { useThemeColor } from '@/hooks/use-theme-color';
 
 export default function RulesScreen() {
   const [selectedRole, setSelectedRole] = useState<RoleDefinition | null>(null);
-  const alienPortrait = require('@/assets/images/Alien.jpg');
+  const alienPortrait = require('@/assets/Alien1.png');
 
   return (
     <ThemedView style={styles.screen}>
