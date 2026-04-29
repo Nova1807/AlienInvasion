@@ -7,6 +7,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useGame } from '@/context/game-context';
 import { useThemeColor } from '@/hooks/use-theme-color';
+import { isSupabaseConfigured } from '@/lib/supabase';
 
 export default function NetworkJoinScreen() {
   const router = useRouter();
@@ -27,10 +28,21 @@ export default function NetworkJoinScreen() {
     if (isJoining) {
       return;
     }
+    if (!isSupabaseConfigured()) {
+      setMessage('Server-Verbindung nicht konfiguriert. Prüfe deine .env-Datei.');
+      return;
+    }
     setIsJoining(true);
     setMessage(null);
     void (async () => {
-      const result = await joinNetworkSession(code, name, vote);
+      let result;
+      try {
+        result = await joinNetworkSession(code, name, vote);
+      } catch {
+        setMessage('Verbindung fehlgeschlagen. Prüfe deine Internetverbindung.');
+        setIsJoining(false);
+        return;
+      }
       if (!result.ok) {
         setMessage(result.error ?? 'Teilnahme fehlgeschlagen.');
         setIsJoining(false);

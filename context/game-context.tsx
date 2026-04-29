@@ -43,7 +43,7 @@ type SessionPlayerRow = {
 
 type GameMode = 'single' | 'network';
 type PhaseId = 'night' | 'day';
-type NightRole = 'alienKatze' | 'seher' | 'doktor';
+type NightRole = 'alienKatze' | 'seher' | 'doktor' | 'hexe' | 'amor';
 type NightStepId = 'sleep' | NightRole | 'sunrise';
 
 type PlayerRecord = {
@@ -78,6 +78,12 @@ type NightRecord = {
   doctorTargetId: string | null;
   seerTargetId: string | null;
   seerResultTeam: TeamId | null;
+  hexeHealUsed: boolean;
+  hexeKillUsed: boolean;
+  hexeHealTarget: string | null;
+  hexeKillTarget: string | null;
+  amorLover1: string | null;
+  amorLover2: string | null;
   casualties: string[];
   saved: string[];
   resolved: boolean;
@@ -95,6 +101,9 @@ type NightResolution = {
   casualties: string[];
   saved: string[];
   seerInsight: { playerId: string; team: TeamId } | null;
+  hexeHealUsed: boolean;
+  hexeKillUsed: boolean;
+  lovers: [string, string] | null;
 };
 
 type DayResolution = {
@@ -261,7 +270,7 @@ const DAY_EVENT_CHANNEL = 'day-events';
 const REMATCH_CHANNEL = 'rematch';
 
 function isNightRole(value: string | null | undefined): value is NightRole {
-  return value === 'alienKatze' || value === 'seher' || value === 'doktor';
+  return value === 'alienKatze' || value === 'seher' || value === 'doktor' || value === 'hexe' || value === 'amor';
 }
 
 function isNightStepId(value: string | null | undefined): value is NightStepId {
@@ -293,6 +302,10 @@ type GameState = {
   alienChatMessages: AlienChatMessage[];
   networkDayEvents: NetworkDayEvent[];
   rematchState: RematchState | null;
+  lovers: [string, string] | null;
+  hexeHealAvailable: boolean;
+  hexeKillAvailable: boolean;
+  jaegerRevengeTargetId: string | null;
 };
 
 type GameAction =
@@ -341,7 +354,8 @@ type GameAction =
   | { type: 'prepareRematch' }
   | { type: 'setNetworkNightStep'; payload: NetworkNightStepState | null }
   | { type: 'syncPhase'; payload: PhaseId }
-  | { type: 'setRematchState'; payload: RematchState | null };
+  | { type: 'setRematchState'; payload: RematchState | null }
+  | { type: 'setJaegerRevengeTarget'; payload: string | null };
 
 type GameContextValue = {
   state: GameState;
@@ -383,6 +397,7 @@ type GameContextValue = {
   setSkipSupport: (support: boolean) => Promise<{ ok: boolean; error?: string }>;
   startRematchVote: () => Promise<{ ok: boolean; error?: string }>;
   castRematchVote: (vote: RematchVoteOption) => Promise<{ ok: boolean; error?: string }>;
+  setJaegerRevengeTarget: (playerId: string | null) => void;
 };
 
 type SetupSummary = {
@@ -453,6 +468,10 @@ function createInitialState(): GameState {
     alienChatMessages: [],
     networkDayEvents: [],
     rematchState: null,
+    lovers: null,
+    hexeHealAvailable: true,
+    hexeKillAvailable: true,
+    jaegerRevengeTargetId: null,
   };
 }
 
@@ -1106,6 +1125,12 @@ function createNightRecord(round: number): NightRecord {
     doctorTargetId: null,
     seerTargetId: null,
     seerResultTeam: null,
+    hexeHealUsed: false,
+    hexeKillUsed: false,
+    hexeHealTarget: null,
+    hexeKillTarget: null,
+    amorLover1: null,
+    amorLover2: null,
     casualties: [],
     saved: [],
     resolved: false,
@@ -1145,14 +1170,26 @@ function computeNightOutcome(state: GameState): NightResolution {
   const saved: string[] = [];
   const { alienTargetId, doctorTargetId, seerTargetId } = activeRecord;
 
+  let alienKillPrevented = false;
   if (alienTargetId) {
     const targetAssignment = state.assignments.find((entry) => entry.playerId === alienTargetId);
     if (targetAssignment?.alive !== false) {
       if (doctorTargetId && doctorTargetId === alienTargetId) {
         saved.push(alienTargetId);
+        alienKillPrevented = true;
+      } else if (activeRecord.hexeHealTarget === alienTargetId) {
+        saved.push(alienTargetId);
+        alienKillPrevented = true;
       } else {
         casualties.push(alienTargetId);
       }
+    }
+  }
+
+  if (activeRecord.hexeKillTarget) {
+    const hexeVictim = state.assignments.find((entry) => entry.playerId === activeRecord.hexeKillTarget);
+    if (hexeVictim?.alive !== false && !casualties.includes(activeRecord.hexeKillTarget)) {
+      casualties.push(activeRecord.hexeKillTarget);
     }
   }
 
@@ -1160,10 +1197,31 @@ function computeNightOutcome(state: GameState): NightResolution {
   if (seerTargetId) {
     const seerAssignment = state.assignments.find((entry) => entry.playerId === seerTargetId);
     if (seerAssignment) {
+      const actualTeam = getRoleDefinition(seerAssignment.roleId).team;
+      const reportedTeam = seerAssignment.roleId === 'spion' ? 'dorf' as TeamId : actualTeam;
       seerInsight = {
         playerId: seerAssignment.playerId,
-        team: getRoleDefinition(seerAssignment.roleId).team,
+        team: reportedTeam,
       };
+    }
+  }
+
+  let lovers: [string, string] | null = state.lovers;
+  if (round === 1 && activeRecord.amorLover1 && activeRecord.amorLover2) {
+    lovers = [activeRecord.amorLover1, activeRecord.amorLover2];
+  }
+  if (lovers) {
+    const [lover1, lover2] = lovers;
+    if (casualties.includes(lover1) && !casualties.includes(lover2)) {
+      const lover2Assignment = state.assignments.find((entry) => entry.playerId === lover2);
+      if (lover2Assignment?.alive !== false) {
+        casualties.push(lover2);
+      }
+    } else if (casualties.includes(lover2) && !casualties.includes(lover1)) {
+      const lover1Assignment = state.assignments.find((entry) => entry.playerId === lover1);
+      if (lover1Assignment?.alive !== false) {
+        casualties.push(lover1);
+      }
     }
   }
 
@@ -1172,12 +1230,15 @@ function computeNightOutcome(state: GameState): NightResolution {
     casualties,
     saved,
     seerInsight,
+    hexeHealUsed: activeRecord.hexeHealUsed || Boolean(activeRecord.hexeHealTarget),
+    hexeKillUsed: activeRecord.hexeKillUsed || Boolean(activeRecord.hexeKillTarget),
+    lovers,
   };
 }
 
 function applyNightTarget(
   record: NightRecord,
-  role: 'alienKatze' | 'seher' | 'doktor',
+  role: NightRole,
   playerId: string | null,
   state: GameState
 ): NightRecord {
@@ -1193,14 +1254,41 @@ function applyNightTarget(
     }
     return { ...record, doctorTargetId: playerId };
   }
-  let seerResultTeam: TeamId | null = null;
-  if (playerId) {
-    const assignment = state.assignments.find((entry) => entry.playerId === playerId);
-    if (assignment) {
-      seerResultTeam = getRoleDefinition(assignment.roleId).team;
+  if (role === 'seher') {
+    let seerResultTeam: TeamId | null = null;
+    if (playerId) {
+      const assignment = state.assignments.find((entry) => entry.playerId === playerId);
+      if (assignment) {
+        const actualTeam = getRoleDefinition(assignment.roleId).team;
+        seerResultTeam = assignment.roleId === 'spion' ? 'dorf' : actualTeam;
+      }
     }
+    return { ...record, seerTargetId: playerId, seerResultTeam };
   }
-  return { ...record, seerTargetId: playerId, seerResultTeam };
+  if (role === 'hexe') {
+    if (!playerId) {
+      return record;
+    }
+    if (playerId.startsWith('heal:')) {
+      const healTarget = playerId.slice(5) || null;
+      return { ...record, hexeHealTarget: healTarget, hexeHealUsed: true };
+    }
+    if (playerId.startsWith('kill:')) {
+      const killTarget = playerId.slice(5) || null;
+      return { ...record, hexeKillTarget: killTarget, hexeKillUsed: true };
+    }
+    return record;
+  }
+  if (role === 'amor') {
+    if (!record.amorLover1 && playerId) {
+      return { ...record, amorLover1: playerId };
+    }
+    if (record.amorLover1 && playerId && playerId !== record.amorLover1) {
+      return { ...record, amorLover2: playerId };
+    }
+    return record;
+  }
+  return record;
 }
 
 function buildAssignments(players: PlayerRecord[], roleCounts: RoleCounts): PlayerAssignment[] {
@@ -1402,6 +1490,10 @@ function reducer(state: GameState, action: GameAction): GameState {
         dayLog: [],
         outcome: null,
         rematchState: null,
+        lovers: null,
+        hexeHealAvailable: true,
+        hexeKillAvailable: true,
+        jaegerRevengeTargetId: null,
       };
     }
     case 'advanceReveal': {
@@ -1481,7 +1573,7 @@ function reducer(state: GameState, action: GameAction): GameState {
       };
     }
     case 'resolveNight': {
-      const { round, casualties, saved } = action.payload;
+      const { round, casualties, saved, hexeHealUsed, hexeKillUsed, lovers: resolvedLovers } = action.payload;
       const nextAssignments = state.assignments.map((assignment) => {
         if (casualties.includes(assignment.playerId)) {
           return ({
@@ -1509,13 +1601,17 @@ function reducer(state: GameState, action: GameAction): GameState {
         nightLog,
         dayLog,
         outcome,
+        hexeHealAvailable: hexeHealUsed ? false : state.hexeHealAvailable,
+        hexeKillAvailable: hexeKillUsed ? false : state.hexeKillAvailable,
+        lovers: resolvedLovers ?? state.lovers,
       };
     }
     case 'resolveDayVote': {
       const { round, votedOutId, skipped } = action.payload;
       let assignments = state.assignments;
+      const additionalDeaths: string[] = [];
       if (votedOutId) {
-        assignments = state.assignments.map((assignment) =>
+        assignments = assignments.map((assignment) =>
           assignment.playerId === votedOutId
             ? ({
                 ...assignment,
@@ -1525,6 +1621,47 @@ function reducer(state: GameState, action: GameAction): GameState {
               } as PlayerAssignment)
             : assignment
         );
+        const votedOutAssignment = state.assignments.find((a) => a.playerId === votedOutId);
+        if (votedOutAssignment?.roleId === 'jaeger') {
+          const jaegerTarget = state.jaegerRevengeTargetId;
+          if (jaegerTarget) {
+            const targetAssignment = assignments.find((a) => a.playerId === jaegerTarget);
+            if (targetAssignment?.alive !== false) {
+              additionalDeaths.push(jaegerTarget);
+              assignments = assignments.map((assignment) =>
+                assignment.playerId === jaegerTarget
+                  ? ({
+                      ...assignment,
+                      alive: false,
+                      eliminatedBy: 'day',
+                      eliminatedInRound: round,
+                    } as PlayerAssignment)
+                  : assignment
+              );
+            }
+          }
+        }
+        if (state.lovers) {
+          const [lover1, lover2] = state.lovers;
+          const killed = votedOutId;
+          const partnerId = killed === lover1 ? lover2 : killed === lover2 ? lover1 : null;
+          if (partnerId && !additionalDeaths.includes(partnerId)) {
+            const partnerAssignment = assignments.find((a) => a.playerId === partnerId);
+            if (partnerAssignment?.alive !== false) {
+              additionalDeaths.push(partnerId);
+              assignments = assignments.map((assignment) =>
+                assignment.playerId === partnerId
+                  ? ({
+                      ...assignment,
+                      alive: false,
+                      eliminatedBy: 'day',
+                      eliminatedInRound: round,
+                    } as PlayerAssignment)
+                  : assignment
+              );
+            }
+          }
+        }
       }
       const existingDay = state.dayLog.find((entry) => entry.round === round);
       const dayLog = existingDay
@@ -1539,6 +1676,7 @@ function reducer(state: GameState, action: GameAction): GameState {
         dayLog,
         outcome,
         round: state.round + 1,
+        jaegerRevengeTargetId: null,
       };
     }
     case 'prepareRematch': {
@@ -1568,6 +1706,10 @@ function reducer(state: GameState, action: GameAction): GameState {
         networkNightActions: {},
         alienChatMessages: [],
         rematchState: null,
+        lovers: null,
+        hexeHealAvailable: true,
+        hexeKillAvailable: true,
+        jaegerRevengeTargetId: null,
       };
     }
     case 'resetGame':
@@ -1576,6 +1718,11 @@ function reducer(state: GameState, action: GameAction): GameState {
       return {
         ...state,
         rematchState: action.payload,
+      };
+    case 'setJaegerRevengeTarget':
+      return {
+        ...state,
+        jaegerRevengeTargetId: action.payload,
       };
     default:
       return state;
@@ -2707,6 +2854,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
+  const setJaegerRevengeTarget = useCallback(
+    (playerId: string | null) => {
+      dispatch({ type: 'setJaegerRevengeTarget', payload: playerId });
+    },
+    [dispatch]
+  );
+
   const resolveNight = useCallback(() => {
     const outcome = computeNightOutcome(state);
     dispatch({ type: 'resolveNight', payload: outcome });
@@ -2774,6 +2928,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       setSkipSupport,
       startRematchVote,
       castRematchVote,
+      setJaegerRevengeTarget,
       resolveNight,
       resolveDayVote,
     }),
@@ -2794,6 +2949,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       setSkipSupport,
       startRematchVote,
       castRematchVote,
+      setJaegerRevengeTarget,
       resolveDayVote,
       resolveNight,
       sendAlienChatMessage,

@@ -27,6 +27,21 @@ export const Colors = {
   },
 };
 
+export const TeamColors = {
+  aliens: {
+    primary: '#ff5a7e',
+    glow: 'rgba(255,90,126,0.3)',
+    border: 'rgba(255,90,126,0.35)',
+    bg: 'rgba(255,90,126,0.08)',
+  },
+  dorf: {
+    primary: '#87ff86',
+    glow: 'rgba(135,255,134,0.3)',
+    border: 'rgba(135,255,134,0.35)',
+    bg: 'rgba(135,255,134,0.08)',
+  },
+};
+
 export const Fonts = Platform.select({
   ios: {
     /** iOS `UIFontDescriptorSystemDesignDefault` */

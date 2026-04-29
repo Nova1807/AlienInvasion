@@ -811,15 +811,7 @@ export default function DayScreen() {
           disabled={!voteResolved || gameEnded}
         />
 
-          <Pressable
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.backButton, { opacity: pressed ? 0.7 : 1 }]}
-            onPress={() => {
-              stop();
-              router.back();
-            }}>
-            <ThemedText style={styles.backLabel}>Zur Host-Übersicht</ThemedText>
-          </Pressable>
+
         </ScrollView>
       </ThemedView>
       {outcome ? (
@@ -1199,14 +1191,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 14,
     opacity: 0.85,
-  },
-  backButton: {
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  backLabel: {
-    color: '#87ff86',
-    fontSize: 14,
   },
   modalBackdrop: {
     flex: 1,

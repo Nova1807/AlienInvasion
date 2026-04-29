@@ -228,16 +228,17 @@ function deriveNetworkDayState({ events, round, participants }: DeriveOptions): 
     return sortByParticipantOrder(a.targetId, b.targetId);
   });
 
-  const stage: 'nominations' | 'voting' = startVoteEvent ? 'voting' : 'nominations';
+  const resolvedStartVote = startVoteEvent as Extract<NetworkDayEvent, { type: 'startVote' }> | null;
+  const stage: 'nominations' | 'voting' = resolvedStartVote ? 'voting' : 'nominations';
   const candidates: string[] = [];
-  if (startVoteEvent) {
+  if (resolvedStartVote) {
     const seen = new Set<string>();
-    startVoteEvent.candidates.forEach((candidateId) => {
+    for (const candidateId of resolvedStartVote.candidates) {
       if (eligibleSet.has(candidateId) && !seen.has(candidateId)) {
         seen.add(candidateId);
         candidates.push(candidateId);
       }
-    });
+    }
   }
   const candidateSet = new Set(candidates);
 

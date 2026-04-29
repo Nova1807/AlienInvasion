@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 
 import { type RoleDefinition } from '@/constants/roles';
 import { RoleArtworks } from '@/constants/role-artwork';
+import { TeamColors } from '@/constants/theme';
 import { useThemeColor } from '@/hooks/use-theme-color';
 
 import { ThemedText } from './themed-text';
@@ -17,10 +18,10 @@ const teamLabels: Record<RoleDefinition['team'], string> = {
 };
 
 export function RoleCard({ role }: RoleCardProps) {
-  const accent = useThemeColor({ light: '#87ff86', dark: '#87ff86' }, 'tint');
   const cardBg = useThemeColor({ light: 'rgba(7,16,28,0.88)', dark: 'rgba(7,16,28,0.88)' }, 'background');
-  const border = useThemeColor({ light: 'rgba(135,255,134,0.28)', dark: 'rgba(135,255,134,0.28)' }, 'tint');
-  const teamTextColor = '#041a0e';
+  const teamColor = TeamColors[role.team];
+  const teamTextColor = role.team === 'aliens' ? '#2a0012' : '#041a0e';
+
   const artworkSource = useMemo(() => {
     const artworks = RoleArtworks[role.id] ?? [];
     if (artworks.length === 0) {
@@ -34,8 +35,8 @@ export function RoleCard({ role }: RoleCardProps) {
   }, [role.id]);
 
   return (
-    <View style={[styles.card, { backgroundColor: cardBg, borderColor: border }]}>
-      <View style={[styles.teamPill, { backgroundColor: accent }]}>
+    <View style={[styles.card, { backgroundColor: cardBg, borderColor: teamColor.border, shadowColor: teamColor.primary }]}>
+      <View style={[styles.teamPill, { backgroundColor: teamColor.primary, shadowColor: teamColor.primary }]}>
         <ThemedText style={[styles.teamText, { color: teamTextColor }]} type="defaultSemiBold">
           {teamLabels[role.team]}
         </ThemedText>
@@ -45,8 +46,9 @@ export function RoleCard({ role }: RoleCardProps) {
           style={[
             styles.artworkFrame,
             {
-              borderColor: accent,
-              shadowColor: accent,
+              borderColor: teamColor.primary,
+              shadowColor: teamColor.primary,
+              backgroundColor: teamColor.bg,
             },
           ]}>
           <Image
@@ -57,17 +59,17 @@ export function RoleCard({ role }: RoleCardProps) {
           />
         </View>
       ) : null}
-      <ThemedText type="subtitle" style={styles.title}>
+      <ThemedText type="subtitle" style={[styles.title, { color: teamColor.primary }]}>
         {role.name}
       </ThemedText>
       <ThemedText style={styles.tagline}>{role.tagline}</ThemedText>
-      <ThemedText style={styles.label} type="defaultSemiBold">
+      <ThemedText style={[styles.label, { color: teamColor.primary }]} type="defaultSemiBold">
         Fähigkeit
       </ThemedText>
       <ThemedText style={styles.text}>{role.ability}</ThemedText>
       {role.nightAction ? (
         <>
-          <ThemedText style={styles.label} type="defaultSemiBold">
+          <ThemedText style={[styles.label, { color: teamColor.primary }]} type="defaultSemiBold">
             Nachtaktion
           </ThemedText>
           <ThemedText style={styles.text}>{role.nightAction}</ThemedText>
@@ -75,7 +77,7 @@ export function RoleCard({ role }: RoleCardProps) {
       ) : null}
       {role.dayAction ? (
         <>
-          <ThemedText style={styles.label} type="defaultSemiBold">
+          <ThemedText style={[styles.label, { color: teamColor.primary }]} type="defaultSemiBold">
             Tagsüber
           </ThemedText>
           <ThemedText style={styles.text}>{role.dayAction}</ThemedText>
@@ -90,7 +92,6 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 18,
     borderWidth: 1,
-    shadowColor: '#3aff9d',
     shadowOpacity: 0.32,
     shadowOffset: { width: 0, height: 16 },
     shadowRadius: 24,
@@ -103,7 +104,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     marginBottom: 2,
-    shadowColor: '#3aff9d',
     shadowOpacity: 0.45,
     shadowOffset: { width: 0, height: 6 },
     shadowRadius: 16,
@@ -114,7 +114,6 @@ const styles = StyleSheet.create({
     padding: 10,
     marginTop: 12,
     marginBottom: 12,
-    backgroundColor: 'rgba(135,255,134,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
     shadowOpacity: 0.32,
