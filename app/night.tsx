@@ -10,7 +10,7 @@ import { useGame, type NightRecord } from '@/context/game-context';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { speakSequence, stop } from '@/utils/speech';
 
-type NightRoleId = 'alienKatze' | 'seher' | 'doktor';
+type NightRoleId = 'alienKatze' | 'seher' | 'doktor' | 'hexe' | 'amor';
 
 type NightStep = {
   id: 'sleep' | NightRoleId | 'sunrise';
@@ -54,6 +54,8 @@ export default function NightScreen() {
       round,
       revealOnDeath,
       networkNightActions,
+      hexeHealAvailable,
+      hexeKillAvailable,
     },
     setPhase,
     startNightRound,
@@ -66,6 +68,8 @@ export default function NightScreen() {
   const [isAdvancing, setIsAdvancing] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [pendingAlienTarget, setPendingAlienTarget] = useState<string | null>(null);
+  const [amorFirstPick, setAmorFirstPick] = useState<string | null>(null);
+  const [hexeAction, setHexeAction] = useState<'heal' | 'kill' | null>(null);
   const isNetworkMode = mode === 'network';
 
   const exitDelayTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -130,14 +134,14 @@ export default function NightScreen() {
     };
   }, [clearAutoAdvance, clearCountdown, clearExitDelay, round, setPhase, startNightRound]);
 
+  const steps = useMemo(() => buildNightSteps(roleCounts, round), [roleCounts, round]);
+  const currentStep = steps[stepIndex] ?? null;
+
   useEffect(() => {
     if (currentStep?.roleId !== 'alienKatze') {
       setPendingAlienTarget(null);
     }
   }, [currentStep?.roleId]);
-
-  const steps = useMemo(() => buildNightSteps(roleCounts, round), [roleCounts, round]);
-  const currentStep = steps[stepIndex] ?? null;
 
   const currentNight = useMemo<NightRecord | null>(() => {
     return nightLog.find((entry) => entry.round === round) ?? null;
@@ -218,7 +222,7 @@ export default function NightScreen() {
     }
     const counts: Record<string, number> = {};
     assignments.forEach((assignment) => {
-      if (assignment.roleId === 'alienKatze' && assignment.alive) {
+      if ((assignment.roleId === 'alienKatze' || assignment.roleId === 'spion') && assignment.alive) {
         const action = networkNightActions[assignment.playerId];
         if (action && action.round === round && action.stepId === currentStep.id && action.targetId) {
           counts[action.targetId] = (counts[action.targetId] || 0) + 1;
@@ -236,7 +240,7 @@ export default function NightScreen() {
     }
     if (currentStep.roleId === 'alienKatze') {
       const aliveAliens = assignments.filter(
-        (assignment) => assignment.roleId === 'alienKatze' && assignment.alive
+        (assignment) => (assignment.roleId === 'alienKatze' || assignment.roleId === 'spion') && assignment.alive
       );
       if (aliveAliens.length === 0) {
         return [] as string[];
@@ -526,7 +530,7 @@ export default function NightScreen() {
     }
     if (roleId === 'alienKatze') {
       const aliveAliens = assignments.filter(
-        (assignment) => assignment.roleId === 'alienKatze' && assignment.alive
+        (assignment) => (assignment.roleId === 'alienKatze' || assignment.roleId === 'spion') && assignment.alive
       );
       if (aliveAliens.length === 0) {
         return;
@@ -546,7 +550,7 @@ export default function NightScreen() {
           return;
         }
         const targetAssignment = assignmentByPlayerId[action.targetId];
-        if (targetAssignment?.roleId === 'alienKatze') {
+        if (targetAssignment?.roleId === 'alienKatze' || targetAssignment?.roleId === 'spion') {
           if (!alienSelfVoteWarnedRef.current) {
             alienSelfVoteWarnedRef.current = true;
             speakSequence(['Nein Alien, ihr könnt keine Verbündeten opfern.']);
@@ -593,22 +597,23 @@ export default function NightScreen() {
       alienSelfVoteWarnedRef.current = false;
       return;
     }
-    let latestAction: (typeof networkNightActions)[string] | null = null;
-    assignments.forEach((assignment) => {
+    type NightActionEntry = { round: number; stepId: string; targetId: string | null; confirmed: boolean; updatedAt: number };
+    let latestAction: NightActionEntry | null = null;
+    for (const assignment of assignments) {
       if (assignment.roleId !== roleId || !assignment.alive) {
-        return;
+        continue;
       }
       const action = networkNightActions[assignment.playerId];
       if (!action) {
-        return;
+        continue;
       }
       if (action.round !== round || action.stepId !== stepId) {
-        return;
+        continue;
       }
       if (!latestAction || action.updatedAt > latestAction.updatedAt) {
         latestAction = action;
       }
-    });
+    }
     if (!latestAction || !latestAction.confirmed || !latestAction.targetId) {
       return;
     }
@@ -634,8 +639,8 @@ export default function NightScreen() {
     }
     if (currentStep.roleId === 'alienKatze') {
       const selectedAssignment = assignmentByPlayerId[playerId];
-      if (selectedAssignment?.roleId === 'alienKatze') {
-        speakSequence(['Nein Alien, du darfst dich nicht selbst umbringen.']);
+      if (selectedAssignment?.roleId === 'alienKatze' || selectedAssignment?.roleId === 'spion') {
+        speakSequence(['Nein Alien, du darfst keine Verbündeten angreifen.']);
         return;
       }
       setPendingAlienTarget((prev) => (prev === playerId ? null : playerId));
@@ -651,6 +656,29 @@ export default function NightScreen() {
       speakSequence(['Du kennst deine eigene Karte bereits.']);
       return;
     }
+    if (currentStep.roleId === 'hexe') {
+      if (!hexeAction) {
+        return;
+      }
+      setNightTarget('hexe', `${hexeAction}:${playerId}`);
+      setHexeAction(null);
+      return;
+    }
+    if (currentStep.roleId === 'amor') {
+      if (!amorFirstPick) {
+        setAmorFirstPick(playerId);
+        setNightTarget('amor', playerId);
+        speakSequence(['Erste Wahl getroffen. Wähle nun die zweite Katze für das Liebespaar.']);
+        return;
+      }
+      if (playerId === amorFirstPick) {
+        speakSequence(['Du hast diese Katze bereits gewählt. Wähle eine andere.']);
+        return;
+      }
+      setNightTarget('amor', playerId);
+      setAmorFirstPick(null);
+      return;
+    }
     setNightTarget(currentStep.roleId, playerId);
   };
 
@@ -663,14 +691,35 @@ export default function NightScreen() {
     setNightTarget('alienKatze', targetId);
   };
 
+  const alienVictimName = useMemo(() => {
+    if (!currentNight?.alienTargetId) {
+      return null;
+    }
+    return getPlayerName(tablePlayers, currentNight.alienTargetId);
+  }, [currentNight?.alienTargetId, tablePlayers]);
+
   const allowTargetSelection = currentStep?.allowTargetSelection ?? false;
-  const selectionEnabled = allowTargetSelection && !isAdvancing && !isNetworkMode;
-  const tableHighlightColor = currentStep?.roleId === 'alienKatze' ? '#ff7aa6' : undefined;
+  const hexeSelectionEnabled = currentStep?.roleId === 'hexe' && hexeAction !== null && !isAdvancing && !isNetworkMode;
+  const selectionEnabled = (allowTargetSelection && !isAdvancing && !isNetworkMode && currentStep?.roleId !== 'hexe') || hexeSelectionEnabled;
+  const tableHighlightColor = currentStep?.roleId === 'alienKatze'
+    ? '#ff7aa6'
+    : currentStep?.roleId === 'hexe'
+    ? '#b366ff'
+    : currentStep?.roleId === 'amor'
+    ? '#ff6b9d'
+    : undefined;
   const effectiveSelectedId = isNetworkMode
     ? null
     : currentStep?.roleId === 'alienKatze'
     ? pendingAlienTarget ?? selectedTargetId
+    : currentStep?.roleId === 'amor'
+    ? amorFirstPick
     : selectedTargetId;
+
+  const handleHexeSkip = () => {
+    setHexeAction(null);
+    advanceStep(stepIndex);
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -715,6 +764,48 @@ export default function NightScreen() {
               onPress={handleAlienConfirm}
               disabled={!pendingAlienTarget}
             />
+          </View>
+        ) : null}
+
+        {currentStep?.roleId === 'hexe' && !isNetworkMode ? (
+          <View style={[styles.alienConfirm, { borderColor: 'rgba(179,102,255,0.35)' }]}>
+            {alienVictimName ? (
+              <ThemedText style={styles.alienConfirmText}>
+                Angegriffenes Opfer: {alienVictimName}
+              </ThemedText>
+            ) : (
+              <ThemedText style={styles.alienConfirmText}>
+                Niemand wurde angegriffen.
+              </ThemedText>
+            )}
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
+              {hexeHealAvailable && alienVictimName ? (
+                <PrimaryButton
+                  label={hexeAction === 'heal' ? 'Heiltrank aktiv — tippe auf eine Katze' : 'Heiltrank'}
+                  onPress={() => setHexeAction(hexeAction === 'heal' ? null : 'heal')}
+                />
+              ) : null}
+              {hexeKillAvailable ? (
+                <PrimaryButton
+                  label={hexeAction === 'kill' ? 'Gifttrank aktiv — tippe auf eine Katze' : 'Gifttrank'}
+                  onPress={() => setHexeAction(hexeAction === 'kill' ? null : 'kill')}
+                />
+              ) : null}
+            </View>
+            <PrimaryButton
+              label="Nichts einsetzen"
+              onPress={handleHexeSkip}
+            />
+          </View>
+        ) : null}
+
+        {currentStep?.roleId === 'amor' && !isNetworkMode ? (
+          <View style={[styles.alienConfirm, { borderColor: 'rgba(255,107,157,0.35)' }]}>
+            <ThemedText style={styles.alienConfirmText}>
+              {amorFirstPick
+                ? `Erste Wahl: ${getPlayerName(tablePlayers, amorFirstPick) ?? '?'}. Wähle die zweite Katze.`
+                : 'Wähle die erste Katze für das Liebespaar.'}
+            </ThemedText>
           </View>
         ) : null}
 
@@ -803,6 +894,40 @@ function buildNightSteps(roleCounts: Record<string, number>, round: number): Nig
     });
   }
 
+  if ((roleCounts.hexe ?? 0) > 0) {
+    steps.push({
+      id: 'hexe',
+      roleId: 'hexe',
+      title: 'Hexe braut Tränke',
+      description:
+        'Die Hexe erwacht und sieht, wer angegriffen wurde. Sie kann ihren Heiltrank oder ihren Gifttrank einsetzen (je einmal pro Spiel).',
+      allowTargetSelection: true,
+      enterSpeech: [
+        'Nächste Rolle: Hexe, öffne deine Augen.',
+        'Du siehst, wer angegriffen wurde. Möchtest du einen Trank einsetzen?',
+      ],
+      exitSpeech: ['Hexe, schließe deine Augen.'],
+      exitDelayMs: 1500,
+    });
+  }
+
+  if (round === 1 && (roleCounts.amor ?? 0) > 0) {
+    steps.push({
+      id: 'amor',
+      roleId: 'amor',
+      title: 'Amor wählt ein Liebespaar',
+      description:
+        'Amor erwacht und wählt zwei Katzen, die sich unsterblich ineinander verlieben. Stirbt eine, stirbt die andere aus gebrochenem Herzen.',
+      allowTargetSelection: true,
+      enterSpeech: [
+        'Amor, öffne deine Augen.',
+        'Wähle zwei Katzen, die zum Liebespaar werden.',
+      ],
+      exitSpeech: ['Amor, schließe deine Augen.'],
+      exitDelayMs: 1500,
+    });
+  }
+
   return steps;
 }
 
@@ -855,6 +980,10 @@ function NightStepCard({
           ? 'Tippt gemeinsam auf den Namen der Katze, die das Dorf verlassen soll.'
           : step.roleId === 'doktor'
           ? 'Tippe auf die Katze, die du heute beschützen möchtest.'
+          : step.roleId === 'hexe'
+          ? 'Wähle einen Trank und tippe auf eine Katze — oder überspringe.'
+          : step.roleId === 'amor'
+          ? 'Tippe nacheinander auf zwei Katzen für das Liebespaar.'
           : 'Tippe heimlich auf einen Namen, um seine Energie zu prüfen.';
     } else if (step.roleId === 'doktor') {
       selectionHint = `Schutz aktiviert für: ${selectedTargetName}`;
@@ -863,6 +992,10 @@ function NightStepCard({
       seerResultText = seerInsight
         ? `${seerInsight.playerName} gehört zum ${teamShortLabel(seerInsight.team)}.`
         : null;
+    } else if (step.roleId === 'hexe') {
+      selectionHint = `Trank eingesetzt auf: ${selectedTargetName}`;
+    } else if (step.roleId === 'amor') {
+      selectionHint = `Liebespaar wird verbunden…`;
     } else {
       selectionHint = `Ziel gewählt: ${selectedTargetName}`;
     }
@@ -1057,6 +1190,10 @@ function getSelectedId(record: NightRecord | null, roleId?: NightRoleId): string
       return record.doctorTargetId;
     case 'seher':
       return record.seerTargetId;
+    case 'hexe':
+      return record.hexeKillTarget ?? record.hexeHealTarget ?? null;
+    case 'amor':
+      return record.amorLover2 ?? record.amorLover1 ?? null;
     default:
       return null;
   }

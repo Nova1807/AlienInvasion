@@ -7,6 +7,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useGame } from '@/context/game-context';
 import { useThemeColor } from '@/hooks/use-theme-color';
+import { isSupabaseConfigured } from '@/lib/supabase';
 
 export default function NetworkHostScreen() {
   const router = useRouter();
@@ -63,17 +64,28 @@ export default function NetworkHostScreen() {
               autoCorrect={false}
             />
             <PrimaryButton
-              label="Sitzung erstellen"
+              label={isCreating ? 'Verbinde…' : 'Sitzung erstellen'}
               onPress={async () => {
                 if (isCreating) {
                   return;
                 }
+                if (!isSupabaseConfigured()) {
+                  setErrorMessage(
+                    'Server-Verbindung nicht konfiguriert. Bitte prüfe, dass EXPO_PUBLIC_SUPABASE_URL und EXPO_PUBLIC_SUPABASE_ANON_KEY in deiner .env gesetzt sind.'
+                  );
+                  return;
+                }
                 setIsCreating(true);
-                const result = await startNetworkSession(hostName);
-                if (!result.ok) {
-                  setErrorMessage(result.error ?? 'Sitzung konnte nicht erstellt werden.');
-                } else {
-                  setErrorMessage(null);
+                setErrorMessage(null);
+                try {
+                  const result = await startNetworkSession(hostName);
+                  if (!result.ok) {
+                    setErrorMessage(result.error ?? 'Sitzung konnte nicht erstellt werden. Prüfe deine Internetverbindung.');
+                  }
+                } catch {
+                  setErrorMessage(
+                    'Verbindung zum Server fehlgeschlagen. Bitte prüfe deine Internetverbindung und versuche es erneut.'
+                  );
                 }
                 setIsCreating(false);
               }}
