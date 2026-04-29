@@ -820,15 +820,7 @@ export default function NightScreen() {
           />
         ) : null}
 
-          <Pressable
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.backButton, { opacity: pressed ? 0.6 : 1 }]}
-            onPress={() => {
-              stop();
-              router.back();
-            }}>
-            <ThemedText style={styles.backLabel}>Zur Host-Übersicht</ThemedText>
-          </Pressable>
+
         </ScrollView>
       </ThemedView>
     </SafeAreaView>
@@ -1391,14 +1383,6 @@ const styles = StyleSheet.create({
   },
   seerResultVillage: {
     color: '#87ff86',
-  },
-  backButton: {
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  backLabel: {
-    color: '#87ff86',
-    fontSize: 14,
   },
   alienConfirm: {
     marginTop: 12,
